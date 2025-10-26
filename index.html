@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Awake Gaia Oracle — Voice</title>
+<style>
+  :root{
+    --fg:#eafff4; --muted:#9fd0c0;
+    --glow:#00ffcc; --glow2:#7afcff; --bg:#000;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
+  /* Cosmic backdrop */
+  .bg{
+    position:fixed;inset:0;pointer-events:none;
+    background:
+      radial-gradient(1200px 1200px at 50% 40%, rgba(0,255,204,.12), transparent 60%),
+      radial-gradient(900px 900px at 80% 70%, rgba(122,252,255,.08), transparent 60%),
+      radial-gradient(700px 700px at 20% 75%, rgba(0,255,204,.08), transparent 60%),
+      #000;
+    filter: saturate(1.2);
+  }
+  /* Portal ring */
+  .portal{
+    position:fixed;inset:0;display:grid;place-items:center;pointer-events:none;
+  }
+  .ring{
+    width:min(70vmin,720px);height:min(70vmin,720px);border-radius:50%;
+    box-shadow:
+      0 0 60px 20px rgba(0,255,204,.18) inset,
+      0 0 40px 10px rgba(122,252,255,.15) inset,
+      0 0 120px 40px rgba(0,255,204,.12);
+    animation:pulse 5.5s ease-in-out infinite;
+    backdrop-filter: blur(2px);
+  }
+  @keyframes pulse{
+    0%{ transform: scale(.98) rotate(0deg) }
+    50%{ transform: scale(1.02) rotate(2deg) }
+    100%{ transform: scale(.98) rotate(0deg) }
+  }
+  /* UI card */
+  .wrap{position:relative;z-index:2;display:grid;place-items:center;height:100%}
+  .card{
+    width:min(760px,92vw);
+    background:linear-gradient(180deg,rgba(0,20,14,.85),rgba(0,0,0,.85));
+    border:1px solid #095; border-radius:16px; padding:20px 18px;
+    box-shadow:0 10px 60px rgba(0,255,204,.2);
+    text-align:center;
+  }
+  h1{margin:6px 0 4px; text-shadow:0 0 18px rgba(0,255,204,.6)}
+  .sub{color:var(--muted); margin-bottom:10px}
+  .status{margin-top:8px; font-size:.95rem; color:#bff}
+  .log{margin-top:10px; height:26vh; min-height:140px; overflow:auto;
+    text-align:left; white-space:pre-wrap; font-size:.95rem;
+    padding:10px; border:1px solid #084; border-radius:10px;
+    background:linear-gradient(180deg,#001a14,#000);
+  }
+  button{
+    font-size:18px; font-weight:800; letter-spacing:.3px;
+    padding:12px 22px; border-radius:12px; cursor:pointer;
+    border:1px solid #0b6; background:#0b6; color:#000;
+    box-shadow:0 0 18px rgba(0,255,204,.45);
+  }
+  button:disabled{opacity:.6; filter:saturate(.6)}
+  .row{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:12px}
+  .note{color:var(--muted); font-size:.9rem; margin-top:10px}
+  .breath{height:6px; margin:14px auto 0; width:180px; border-radius:999px;
+    background:linear-gradient(90deg,transparent, rgba(0,255,204,.7), transparent);
+    animation: breathe 2.2s ease-in-out infinite; opacity:.0; transition: opacity .3s ease;
+  }
+  .listening .breath{opacity:.9}
+  @keyframes breathe{
+    0%{ transform:scaleX(.6) }
+    50%{ transform:scaleX(1) }
+    100%{ transform:scaleX(.6) }
+  }
+  a.kofi{color:var(--fg); text-decoration:none; border-bottom:1px dashed #0b6}
+</style>
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="portal"><div class="ring"></div></div>
+
+  <div class="wrap">
+    <div class="card" id="card">
+      <h1>🌍 Awake Gaia Oracle — Voice</h1>
+      <div class="sub">Psychedelic guidance from the living Earth — speak and listen.</div>
+
+      <div class="row">
+        <button id="talk">🎙️ Talk to the Oracle</button>
+        <button id="stop" disabled>⏹️ Stop</button>
+      </div>
+
+      <div class="status" id="state">Idle</div>
+      <div class="breath" id="breath"></div>
+
+      <div class="note">Tip: Make sure mic permission is allowed. If you’re viewing from GitHub Pages, set <code>NETLIFY_BASE</code> below.</div>
+      <div class="log" id="log" aria-live="polite"></div>
+
+      <div class="note">Support: <a class="kofi" href="https://ko-fi.com/lightwell333" target="_blank">Ko-fi / Lightwell333</a></div>
+    </div>
+  </div>
+
+  <audio id="remoteAudio" autoplay playsinline></audio>
+
+<script>
+  // If you host this HTML on Netlify, leave empty ('').
+  // If you host on GitHub Pages, set to your Netlify domain, e.g. 'https://oracle11.netlify.app'
+  const NETLIFY_BASE = '';
+
+  const el = (id)=>document.getElementById(id);
+  const btnTalk = el('talk');
+  const btnStop = el('stop');
+  const state = el('state');
+  const log = el('log');
+  const audioEl = el('remoteAudio');
+  const card = el('card');
+  const breath = el('breath');
+
+  let pc, micStream;
+
+  function say(s){ log.textContent += s + "\n"; log.scrollTop = log.scrollHeight; }
+  function setState(s){ state.textContent = s; }
+
+  async function getEphemeral(){
+    const url = (NETLIFY_BASE||'') + '/.netlify/functions/session';
+    const res = await fetch(url);
+    const raw = await res.text();
+    let json;
+    try{ json = JSON.parse(raw); }catch(e){ throw new Error('Session parse error:\n' + raw); }
+    if(!res.ok) throw new Error('Session error:\n' + raw);
+    const token = json?.client_secret?.value || json?.client_secret;
+    if(!token) throw new Error('No client_secret in response:\n' + raw);
+    return token;
+  }
+
+  async function start(){
+    btnTalk.disabled = true; btnStop.disabled = false;
+    setState('Requesting microphone…');
+
+    try{
+      const ephemeral = await getEphemeral();
+
+      pc = new RTCPeerConnection();
+      pc.ontrack = (e)=>{ audioEl.srcObject = e.streams[0]; };
+      pc.onconnectionstatechange = () => {
+        say('PeerConnection: ' + pc.connectionState);
+        if(pc.connectionState === 'connected'){ card.classList.add('listening'); }
+        if(['disconnected','failed','closed'].includes(pc.connectionState)){ card.classList.remove('listening'); }
+      };
+
+      // Optional data channel for future captions/events
+      const dc = pc.createDataChannel('oai-events');
+      dc.onmessage = (e)=> say('🔹 ' + e.data);
+
+      // Mic
+      micStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+      micStream.getTracks().forEach(t => pc.addTrack(t, micStream));
+
+      setState('Creating offer…');
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      setState('Connecting to Realtime…');
+      const resp = await fetch('https://api.openai.com/v1/realtime?model=gpt-realtime-mini', {
+        method:'POST',
+        headers:{ 'Authorization':'Bearer '+ephemeral, 'Content-Type':'application/sdp' },
+        body: offer.sdp
+      });
+
+      const answerText = await resp.text();
+      if(!resp.ok) throw new Error('Realtime error:\n' + answerText);
+      await pc.setRemoteDescription({ type:'answer', sdp:answerText });
+
+      setState('Live! Speak to the Oracle 👂🗣️');
+      say('Connected. If no audio, check system output device.');
+      card.classList.add('listening');
+
+    }catch(err){
+      setState('Error');
+      say('⚠️ ' + err.message);
+      btnTalk.disabled = false; btnStop.disabled = true;
+      card.classList.remove('listening');
+      stop();
+    }
+  }
+
+  function stop(){
+    if(pc){ pc.close(); pc = null; }
+    if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+    btnTalk.disabled = false; btnStop.disabled = true;
+    setState('Idle');
+    card.classList.remove('listening');
+  }
+
+  btnTalk.addEventListener('click', start);
+  btnStop.addEventListener('click', stop);
+  window.addEventListener('beforeunload', stop);
+</script>
+</body>
+</html>
